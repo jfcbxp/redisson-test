@@ -7,10 +7,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.DeletedObjectListener;
 import org.redisson.api.ExpiredObjectListener;
+import org.redisson.api.LocalCachedMapOptions;
 import org.redisson.api.RBucketReactive;
+import org.redisson.api.RListReactive;
+import org.redisson.api.RLocalCachedMap;
 import org.redisson.api.RMapCacheReactive;
 import org.redisson.api.RMapReactive;
 import org.redisson.api.RedissonReactiveClient;
+import org.redisson.client.codec.LongCodec;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.codec.TypedJsonJacksonCodec;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,8 +24,10 @@ import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.LongStream;
 
 import static jodd.util.ThreadUtil.sleep;
 
@@ -31,8 +37,20 @@ class RedissonApplicationTests {
 	private RedissonConfig redissonConfig = new RedissonConfig();
 	private RedissonReactiveClient client;
 
+	private RLocalCachedMap<Integer,Student> studentsMap;
+
 	@BeforeEach
 	public void setClient(){
+		RedissonConfig config = new RedissonConfig();
+		var reddisonClient = config.getClient();
+
+		LocalCachedMapOptions<Integer,Student> mapOptions =
+				LocalCachedMapOptions.<Integer,Student>defaults().syncStrategy(LocalCachedMapOptions.SyncStrategy.UPDATE)
+						.reconnectionStrategy(LocalCachedMapOptions.ReconnectionStrategy.NONE);
+
+		studentsMap =
+				reddisonClient.getLocalCachedMap("students", new TypedJsonJacksonCodec(Integer.class,Student.class),
+						mapOptions);
 		this.client = this.redissonConfig.getReactiveClient();
 	}
 
@@ -191,6 +209,43 @@ class RedissonApplicationTests {
 
 		mapCache.get(1).doOnNext(System.out::println).subscribe();
 		mapCache.get(2).doOnNext(System.out::println).subscribe();
+
+	}
+
+	@Test
+	void appServer1() {
+		Student student = new Student("marshal", 10, "atlanta", Arrays.asList(1, 2, 3));
+		Student student2 = new Student("marshal2", 10, "atlanta2", Arrays.asList(1, 2, 3));
+
+		this.studentsMap.put(1,student);
+		this.studentsMap.put(2,student2);
+
+		Flux.interval(Duration.ofSeconds(1)).doOnNext(i -> System.out.println(i + "--->" + studentsMap.get(1)))
+				.subscribe();
+
+		sleep(6000000);
+
+	}
+
+	@Test
+	void appServer2() {
+		Student student = new Student("marshal-update", 10, "atlanta", Arrays.asList(1, 2, 3));
+
+		this.studentsMap.put(1,student);
+
+	}
+
+	@Test
+	void listTest() {
+		RListReactive<Long> listReactive = this.client.getList("number-input", LongCodec.INSTANCE);
+
+		List<Long> list = LongStream.rangeClosed(1,10)
+				.boxed()
+				.toList();
+
+		StepVerifier.create(listReactive.addAll(list).then()).verifyComplete();
+		StepVerifier.create(listReactive.size()).expectNext(10)
+				.verifyComplete();
 
 	}
 

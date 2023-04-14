@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.redisson.api.DeletedObjectListener;
 import org.redisson.api.ExpiredObjectListener;
 import org.redisson.api.RBucketReactive;
+import org.redisson.api.RMapCacheReactive;
+import org.redisson.api.RMapReactive;
 import org.redisson.api.RedissonReactiveClient;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.codec.TypedJsonJacksonCodec;
@@ -18,6 +20,7 @@ import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static jodd.util.ThreadUtil.sleep;
@@ -133,6 +136,61 @@ class RedissonApplicationTests {
 		StepVerifier.create(set.concatWith(get).concatWith(event)).verifyComplete();
 
 		sleep(11000);
+
+	}
+
+	@Test
+	void mapTest() {
+		RMapReactive<String,String> map = this.client.getMap("user:1", StringCodec.INSTANCE);
+		var name = map.put("name","jor");
+		var age = map.put("age","19");
+		var city = map.put("city","belem");
+		StepVerifier.create(name.concatWith(age).concatWith(city).then()).verifyComplete();
+	}
+
+	@Test
+	void mapTest2() {
+		RMapReactive<String,String> map = this.client.getMap("user:2", StringCodec.INSTANCE);
+		Map<String,String> javaMap = Map.of("name","jor","age","30","city","miami");
+		StepVerifier.create(map.putAll(javaMap).then()).verifyComplete();
+	}
+
+	@Test
+	void mapTest3() {
+		var codec = new TypedJsonJacksonCodec(Integer.class, Student.class);
+		RMapReactive<Integer,Student> map = this.client.getMap("users", codec);
+		Student student = new Student("marshal",10,"atlanta", Arrays.asList(1,2,3));
+		Student student2 = new Student("marshal2",10,"atlanta2", Arrays.asList(1,2,3));
+
+		StepVerifier.create(map.put(1,student).concatWith(map.put(2,student2)).then()).verifyComplete();
+	}
+
+	@Test
+	void mapCacheTest() {
+		var codec = new TypedJsonJacksonCodec(Integer.class, Student.class);
+		RMapCacheReactive<Integer,Student> mapCache = this.client.getMapCache("users:cache",codec);
+		Student student = new Student("marshal",10,"atlanta", Arrays.asList(1,2,3));
+		Student student2 = new Student("marshal2",10,"atlanta2", Arrays.asList(1,2,3));
+
+		Mono<Student> st1 = mapCache.put(1,student,5,TimeUnit.SECONDS);
+		Mono<Student> st2 = mapCache.put(2,student2,10,TimeUnit.SECONDS);
+
+		StepVerifier.create(st1.then(st2).then()).verifyComplete();
+
+		sleep(4000);
+
+		mapCache.get(1).doOnNext(System.out::println).subscribe();
+		mapCache.get(2).doOnNext(System.out::println).subscribe();
+
+		sleep(4000);
+
+		mapCache.get(1).doOnNext(System.out::println).subscribe();
+		mapCache.get(2).doOnNext(System.out::println).subscribe();
+
+		sleep(4000);
+
+		mapCache.get(1).doOnNext(System.out::println).subscribe();
+		mapCache.get(2).doOnNext(System.out::println).subscribe();
 
 	}
 

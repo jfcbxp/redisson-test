@@ -9,10 +9,12 @@ import org.redisson.api.DeletedObjectListener;
 import org.redisson.api.ExpiredObjectListener;
 import org.redisson.api.LocalCachedMapOptions;
 import org.redisson.api.RBucketReactive;
+import org.redisson.api.RDequeReactive;
 import org.redisson.api.RListReactive;
 import org.redisson.api.RLocalCachedMap;
 import org.redisson.api.RMapCacheReactive;
 import org.redisson.api.RMapReactive;
+import org.redisson.api.RQueueReactive;
 import org.redisson.api.RedissonReactiveClient;
 import org.redisson.client.codec.LongCodec;
 import org.redisson.client.codec.StringCodec;
@@ -246,6 +248,37 @@ class RedissonApplicationTests {
 		StepVerifier.create(listReactive.addAll(list).then()).verifyComplete();
 		StepVerifier.create(listReactive.size()).expectNext(10)
 				.verifyComplete();
+
+	}
+
+	@Test
+	void queueTest() {
+		RQueueReactive<Long> queue = this.client.getQueue("number-input", LongCodec.INSTANCE);
+		Mono<Void> mono =  queue.poll()
+				.repeat(3)
+				.doOnNext(System.out::println)
+				.then(); //remove from begining
+		StepVerifier.create(mono)
+				.verifyComplete();
+		StepVerifier.create(queue.size())
+				.expectNext(6)
+				.verifyComplete();
+
+
+	}
+	@Test
+	void stackTest() {
+		RDequeReactive<Long> deque = this.client.getDeque("number-input", LongCodec.INSTANCE);
+		Mono<Void> mono =  deque.pollLast()
+				.repeat(3)
+				.doOnNext(System.out::println)
+				.then(); //remove from begining
+		StepVerifier.create(mono)
+				.verifyComplete();
+		StepVerifier.create(deque.size())
+				.expectNext(6)
+				.verifyComplete();
+
 
 	}
 

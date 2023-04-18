@@ -5,9 +5,11 @@ import com.jfcbxp.redisson.dto.Student;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.BatchOptions;
 import org.redisson.api.DeletedObjectListener;
 import org.redisson.api.ExpiredObjectListener;
 import org.redisson.api.LocalCachedMapOptions;
+import org.redisson.api.RBatchReactive;
 import org.redisson.api.RBlockingDequeReactive;
 import org.redisson.api.RBucketReactive;
 import org.redisson.api.RDequeReactive;
@@ -18,6 +20,7 @@ import org.redisson.api.RMapCacheReactive;
 import org.redisson.api.RMapReactive;
 import org.redisson.api.RPatternTopicReactive;
 import org.redisson.api.RQueueReactive;
+import org.redisson.api.RSetReactive;
 import org.redisson.api.RTopicReactive;
 import org.redisson.api.RedissonReactiveClient;
 import org.redisson.api.listener.PatternMessageListener;
@@ -371,5 +374,21 @@ class RedissonApplicationTests {
 
 		sleep(600_000);
 	}
-	
+
+	@Test
+	void batchTest() {
+		RBatchReactive batch = this.client.createBatch(BatchOptions.defaults());
+		RListReactive<Long> list = batch.getList("numbers-list", LongCodec.INSTANCE);
+		RSetReactive<Long> set = batch.getSet("numbers-set", LongCodec.INSTANCE);
+
+		list.addAll(LongStream.rangeClosed(0,99)
+				.boxed()
+				.toList());
+		set.addAll(LongStream.rangeClosed(100,200)
+				.boxed()
+				.toList());
+		StepVerifier.create(batch.execute().then())
+				.verifyComplete();
+	}
+
 }

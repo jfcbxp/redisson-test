@@ -11,12 +11,16 @@ import org.redisson.api.LocalCachedMapOptions;
 import org.redisson.api.RBlockingDequeReactive;
 import org.redisson.api.RBucketReactive;
 import org.redisson.api.RDequeReactive;
+import org.redisson.api.RHyperLogLogReactive;
 import org.redisson.api.RListReactive;
 import org.redisson.api.RLocalCachedMap;
 import org.redisson.api.RMapCacheReactive;
 import org.redisson.api.RMapReactive;
+import org.redisson.api.RPatternTopicReactive;
 import org.redisson.api.RQueueReactive;
+import org.redisson.api.RTopicReactive;
 import org.redisson.api.RedissonReactiveClient;
+import org.redisson.api.listener.PatternMessageListener;
 import org.redisson.client.codec.LongCodec;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.codec.TypedJsonJacksonCodec;
@@ -30,6 +34,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static jodd.util.ThreadUtil.sleep;
@@ -223,7 +228,7 @@ class RedissonApplicationTests {
 	}
 
 	@Test
-	void appServer1() {
+	void appServer1Test() {
 		Student student = new Student("marshal", 10, "atlanta", Arrays.asList(1, 2, 3));
 		Student student2 = new Student("marshal2", 10, "atlanta2", Arrays.asList(1, 2, 3));
 
@@ -238,7 +243,7 @@ class RedissonApplicationTests {
 	}
 
 	@Test
-	void appServer2() {
+	void appServer2Test() {
 		Student student = new Student("marshal-update", 10, "atlanta", Arrays.asList(1, 2, 3));
 
 		this.studentsMap.put(1,student);
@@ -290,7 +295,7 @@ class RedissonApplicationTests {
 	}
 
 	@Test
-	void consumer1() {
+	void consumer1Test() {
 		this.msgQueue.takeElements()
 				.doOnNext(i -> System.out.println("Consumer 1 "+i))
 				.doOnError(System.out::println)
@@ -300,7 +305,7 @@ class RedissonApplicationTests {
 	}
 
 	@Test
-	void consumer2() {
+	void consumer2Test() {
 		this.msgQueue.takeElements()
 				.doOnNext(i -> System.out.println("Consumer 2 "+i))
 				.doOnError(System.out::println)
@@ -310,7 +315,7 @@ class RedissonApplicationTests {
 	}
 
 	@Test
-	void producer() {
+	void producerTest() {
 		Mono<Void> mono = Flux.range(1,1000)
 				.delayElements(Duration.ofSeconds(1))
 				.doOnNext(i -> System.out.println("Producer " + i))
@@ -321,5 +326,50 @@ class RedissonApplicationTests {
 				.verifyComplete();
 	}
 
+	@Test
+	void HyperLogLogTest() {
+		RHyperLogLogReactive<Long> hyperLogLog = this.client.getHyperLogLog("user:visits", LongCodec.INSTANCE);
 
+		List<Long> collect = LongStream.rangeClosed(1, 25)
+				.boxed()
+				.collect(Collectors.toList());
+
+		List<Long> collect2 = LongStream.rangeClosed(1, 25)
+				.boxed()
+				.collect(Collectors.toList());
+
+		Mono<Void> mono = Flux.just(collect, collect2).flatMap(hyperLogLog::addAll).then();
+
+		StepVerifier.create(mono)
+				.verifyComplete();
+
+		hyperLogLog.count()
+				.doOnNext(System.out::println)
+				.subscribe();
+	}
+
+	@Test
+	void subscriber1Test() {
+		RTopicReactive topic = this.client.getTopic("slack-room", StringCodec.INSTANCE);
+		topic.getMessages(String.class)
+						.doOnError(System.out::println)
+						.doOnNext(System.out::println)
+						.subscribe();
+
+		sleep(600_000);
+	}
+
+	@Test
+	void subscriber2Test() {
+		RPatternTopicReactive patternTopic = this.client.getPatternTopic("slack-room", StringCodec.INSTANCE);
+		patternTopic.addListener(String.class, new PatternMessageListener<String>() {
+			@Override
+			public void onMessage(CharSequence pattern, CharSequence topic, String message) {
+				System.out.println(pattern  + ":" + topic + ":" + message);
+			}
+		}).subscribe();
+
+		sleep(600_000);
+	}
+	
 }

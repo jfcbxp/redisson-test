@@ -22,7 +22,9 @@ import org.redisson.api.RPatternTopicReactive;
 import org.redisson.api.RQueueReactive;
 import org.redisson.api.RSetReactive;
 import org.redisson.api.RTopicReactive;
+import org.redisson.api.RTransactionReactive;
 import org.redisson.api.RedissonReactiveClient;
+import org.redisson.api.TransactionOptions;
 import org.redisson.api.listener.PatternMessageListener;
 import org.redisson.client.codec.LongCodec;
 import org.redisson.client.codec.StringCodec;
@@ -47,10 +49,10 @@ class RedissonApplicationTests {
 
 	private RedissonConfig redissonConfig = new RedissonConfig();
 	private RedissonReactiveClient client;
-
 	private RLocalCachedMap<Integer,Student> studentsMap;
-
 	private RBlockingDequeReactive<Long> msgQueue;
+	private RBucketReactive<Long> user1Balance;
+	private RBucketReactive<Long> user2Balance;
 
 	@BeforeEach
 	public void setClient(){
@@ -66,10 +68,21 @@ class RedissonApplicationTests {
 						mapOptions);
 		this.client = this.redissonConfig.getReactiveClient();
 		setupQueue();
+		setBalance();
 	}
 
 	public void setupQueue(){
 		msgQueue =  this.client.getBlockingDeque("message-queue",LongCodec.INSTANCE);
+	}
+
+	public void setBalance(){
+		user1Balance = this.client.getBucket("user:1:balance", LongCodec.INSTANCE);
+		user2Balance = this.client.getBucket("user:2:balance", LongCodec.INSTANCE);
+		Mono<Void> mono = user1Balance.set(100L)
+				.then(user2Balance.set(0L))
+				.then();
+
+		StepVerifier.create(mono).verifyComplete();
 	}
 
 	@AfterEach
@@ -389,6 +402,38 @@ class RedissonApplicationTests {
 				.toList());
 		StepVerifier.create(batch.execute().then())
 				.verifyComplete();
+	}
+
+	@Test
+	void nonTransactionTest(){
+		transfer(user1Balance,user2Balance,50)
+				.thenReturn(0)
+				.map(i -> (5/ i)) //some error
+				.subscribe();
+		sleep(1000);
+
+	}
+
+	@Test
+	void transactionTest(){
+		RTransactionReactive transaction = this.client.createTransaction(TransactionOptions.defaults());
+		RBucketReactive<Long> userBalance1 = transaction.getBucket("user:1:balance", LongCodec.INSTANCE);
+		RBucketReactive<Long> userBalance2 = transaction.getBucket("user:2:balance", LongCodec.INSTANCE);
+		transfer(userBalance1,userBalance2,50)
+				.thenReturn(0)
+				.map(i -> (5/ i)) //some error
+				.then(transaction.commit())
+				.onErrorResume(ex -> transaction.rollback())
+				.subscribe();
+		sleep(1000);
+
+	}
+
+	Mono<Void> transfer(RBucketReactive<Long>  fromAccount, RBucketReactive<Long> toAccount, int amount){
+		return Flux.zip(fromAccount.get(),toAccount.get())
+				.filter(t -> t.getT1() >= amount)
+				.flatMap(t -> fromAccount.set(t.getT1() - amount).thenReturn(t))
+				.flatMap(t -> toAccount.set(t.getT2() + amount)).then();
 	}
 
 }

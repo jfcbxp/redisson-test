@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.redisson.api.DeletedObjectListener;
 import org.redisson.api.ExpiredObjectListener;
 import org.redisson.api.LocalCachedMapOptions;
+import org.redisson.api.RBlockingDequeReactive;
 import org.redisson.api.RBucketReactive;
 import org.redisson.api.RDequeReactive;
 import org.redisson.api.RListReactive;
@@ -41,6 +42,8 @@ class RedissonApplicationTests {
 
 	private RLocalCachedMap<Integer,Student> studentsMap;
 
+	private RBlockingDequeReactive<Long> msgQueue;
+
 	@BeforeEach
 	public void setClient(){
 		RedissonConfig config = new RedissonConfig();
@@ -54,6 +57,11 @@ class RedissonApplicationTests {
 				reddisonClient.getLocalCachedMap("students", new TypedJsonJacksonCodec(Integer.class,Student.class),
 						mapOptions);
 		this.client = this.redissonConfig.getReactiveClient();
+		setupQueue();
+	}
+
+	public void setupQueue(){
+		msgQueue =  this.client.getBlockingDeque("message-queue",LongCodec.INSTANCE);
 	}
 
 	@AfterEach
@@ -279,7 +287,38 @@ class RedissonApplicationTests {
 				.expectNext(6)
 				.verifyComplete();
 
+	}
 
+	@Test
+	void consumer1() {
+		this.msgQueue.takeElements()
+				.doOnNext(i -> System.out.println("Consumer 1 "+i))
+				.doOnError(System.out::println)
+				.subscribe();
+
+		sleep(600_000);
+	}
+
+	@Test
+	void consumer2() {
+		this.msgQueue.takeElements()
+				.doOnNext(i -> System.out.println("Consumer 2 "+i))
+				.doOnError(System.out::println)
+				.subscribe();
+
+		sleep(600_000);
+	}
+
+	@Test
+	void producer() {
+		Mono<Void> mono = Flux.range(1,1000)
+				.delayElements(Duration.ofSeconds(1))
+				.doOnNext(i -> System.out.println("Producer " + i))
+				.flatMap(i -> this.msgQueue.add(Long.valueOf(i)))
+				.then();
+
+		StepVerifier.create(mono)
+				.verifyComplete();
 	}
 
 

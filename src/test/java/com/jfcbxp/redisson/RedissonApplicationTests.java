@@ -1,7 +1,10 @@
 package com.jfcbxp.redisson;
 
 import com.jfcbxp.redisson.config.RedissonConfig;
+import com.jfcbxp.redisson.dto.PriorityQueue;
 import com.jfcbxp.redisson.dto.Student;
+import com.jfcbxp.redisson.dto.UserOrder;
+import com.jfcbxp.redisson.enums.Category;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,7 @@ import org.redisson.api.RMapCacheReactive;
 import org.redisson.api.RMapReactive;
 import org.redisson.api.RPatternTopicReactive;
 import org.redisson.api.RQueueReactive;
+import org.redisson.api.RScoredSortedSetReactive;
 import org.redisson.api.RSetReactive;
 import org.redisson.api.RTopicReactive;
 import org.redisson.api.RTransactionReactive;
@@ -39,6 +43,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -53,6 +58,8 @@ class RedissonApplicationTests {
 	private RBlockingDequeReactive<Long> msgQueue;
 	private RBucketReactive<Long> user1Balance;
 	private RBucketReactive<Long> user2Balance;
+
+	private PriorityQueue priorityQueue;
 
 	@BeforeEach
 	public void setClient(){
@@ -73,6 +80,9 @@ class RedissonApplicationTests {
 
 	public void setupQueue(){
 		msgQueue =  this.client.getBlockingDeque("message-queue",LongCodec.INSTANCE);
+
+		RScoredSortedSetReactive<UserOrder> sortedSet =  this.client.getScoredSortedSet("user:order:queue",new TypedJsonJacksonCodec(UserOrder.class));
+		priorityQueue = new PriorityQueue(sortedSet);
 	}
 
 	public void setBalance(){
@@ -426,6 +436,47 @@ class RedissonApplicationTests {
 				.onErrorResume(ex -> transaction.rollback())
 				.subscribe();
 		sleep(1000);
+
+	}
+
+	@Test
+	void sortedTest(){
+		RScoredSortedSetReactive<String> scoredSortedSet = this.client.getScoredSortedSet("student:score", StringCodec.INSTANCE);
+		Mono<Void> mono = scoredSortedSet.addScore("sam", 12.25).then(scoredSortedSet.add(23.5, "mike"))
+				.then(scoredSortedSet.addScore("jake", 7)).then();
+		StepVerifier.create(mono)
+				.verifyComplete();
+
+		scoredSortedSet.entryRange(0,1)
+				.flatMapIterable(Function.identity())
+				.map(se -> se.getScore() + " : "+ se.getValue() )
+				.doOnNext(System.out::println)
+				.subscribe();
+
+	}
+
+	@Test
+	void producerPriorityTest(){
+		UserOrder u1 = new UserOrder(1, Category.GUEST);
+		UserOrder u2 = new UserOrder(2, Category.STD);
+		UserOrder u3 = new UserOrder(3, Category.PRIME);
+		UserOrder u4 = new UserOrder(4, Category.GUEST);
+
+		Mono<Void> mono = Flux.just(u1, u2, u3, u4).flatMap(this.priorityQueue::add).then();
+		StepVerifier.create(mono)
+				.verifyComplete();
+
+	}
+
+	@Test
+	void consumerPriorityTest(){
+		this.priorityQueue.takeItems()
+				.delayElements(Duration.ofSeconds(1))
+				.doOnNext(System.out::println)
+				.subscribe();
+
+		sleep(600_000);
+
 
 	}
 
